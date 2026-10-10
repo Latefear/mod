@@ -16,6 +16,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.command.CommandSource;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
@@ -348,6 +349,20 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
 
     private static boolean isKeyDown(long handle, int key) {
         return GLFW.glfwGetKey(handle, key) == GLFW.GLFW_PRESS;
+    }
+
+    /**
+     * Used by ItemStackMixin. Returns the fake name for this stack, or null
+     * if the item has no override (so the real name is used).
+     */
+    public static Text getFakeName(ItemStack stack) {
+        if (stack.isOf(Items.AMETHYST_SHARD) && amethystName != null) {
+            return Text.literal(amethystName).formatted(Formatting.WHITE);
+        }
+        if (stack.isOf(Items.ECHO_SHARD) && echoName != null) {
+            return Text.literal(echoName).formatted(Formatting.YELLOW);
+        }
+        return null;
     }
 
     private static boolean modifierHeld(long handle) {
