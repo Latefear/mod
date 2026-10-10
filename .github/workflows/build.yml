@@ -1,0 +1,33 @@
+name: Build mod
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: donutsmp-visual-balance-src/donut-balance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 9.2.0
+
+      - name: Build
+        run: gradle build --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: donutsmp-visual-balance-jar
+          path: |
+            donutsmp-visual-balance-src/donut-balance/build/libs/*.jar
+            !donutsmp-visual-balance-src/donut-balance/build/libs/*-sources.jar
