@@ -22,7 +22,15 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import org.lwjgl.glfw.GLFW;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class DonutVisualBalanceClient implements ClientModInitializer {
     private static double balance = 1_000_000_000d;
@@ -39,14 +47,60 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
     private static String echoName = null;
     private static final boolean[] wasDown = new boolean[10];
 
-    // /fpay tab-completion: online players for <name>
+    // /fpay tab-completion: names come from this online list. If it hasn't
+    // loaded (or the download failed), it falls back to the server's players.
+    private static final String PLAYER_LIST_URL =
+        "https://raw.githubusercontent.com/Latefear/mod/refs/heads/main/"
+        + "donutsmp_expanded_player_list.txt";
+
+    // Pulls each "name" out of the file, ignoring anything malformed
+    private static final Pattern NAME_PATTERN =
+        Pattern.compile("\"([A-Za-z0-9_]{1,16})\"");
+
+    private static volatile List<String> playerList = List.of();
+
     private static final SuggestionProvider<FabricClientCommandSource>
-        PLAYER_SUGGESTIONS = (ctx, builder) -> CommandSource.suggestMatching(
-            ctx.getSource().getPlayerNames(), builder
-        );
+        PLAYER_SUGGESTIONS = (ctx, builder) -> {
+            List<String> names = playerList.isEmpty()
+                ? new ArrayList<>(ctx.getSource().getPlayerNames())
+                : playerList;
+            return CommandSource.suggestMatching(names, builder);
+        };
+
+    /** Downloads the player list once in the background at startup. */
+    private static void loadPlayerList() {
+        Thread t = new Thread(() -> {
+            try {
+                HttpClient client = HttpClient.newHttpClient();
+                HttpRequest request = HttpRequest
+                    .newBuilder(URI.create(PLAYER_LIST_URL))
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build();
+                HttpResponse<String> response = client.send(
+                    request, HttpResponse.BodyHandlers.ofString()
+                );
+
+                if (response.statusCode() == 200) {
+                    List<String> names = new ArrayList<>();
+                    Matcher m = NAME_PATTERN.matcher(response.body());
+                    while (m.find()) {
+                        names.add(m.group(1));
+                    }
+                    playerList = List.copyOf(names);
+                }
+            } catch (Exception e) {
+                // Keep the fallback (server player list)
+            }
+        }, "fpay-player-list");
+        t.setDaemon(true);
+        t.start();
+    }
 
     @Override
     public void onInitializeClient() {
+        loadPlayerList();
+
         HudElementRegistry.replaceElement(
             VanillaHudElements.SCOREBOARD,
             original -> (context, tickCounter) -> {
