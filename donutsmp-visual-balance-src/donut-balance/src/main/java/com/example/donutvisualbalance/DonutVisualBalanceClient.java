@@ -1,3 +1,4 @@
+
 package com.example.donutvisualbalance;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -8,89 +9,254 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
+import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 
 public class DonutVisualBalanceClient implements ClientModInitializer {
-    private static String amount = "1B";
+    private static double balance = 1_000_000_000d;
     private static boolean enabled = true;
 
     private static final int GREEN = 0xFF55FF55;
     private static final int WHITE = 0xFFFFFFFF;
-    // Box behind the text: measured ~40% black from the real sidebar (0x66 = 102/255).
     private static final int BG = 0x66000000;
 
     @Override
     public void onInitializeClient() {
-        // Replace the server scoreboard sidebar with our fake one (when enabled).
-        HudElementRegistry.replaceElement(VanillaHudElements.SCOREBOARD, original -> (context, tickCounter) -> {
-            MinecraftClient mc = MinecraftClient.getInstance();
-            if (!enabled) {
-                original.render(context, tickCounter);
-                return;
+        HudElementRegistry.replaceElement(
+            VanillaHudElements.SCOREBOARD,
+            original -> (context, tickCounter) -> {
+                MinecraftClient mc = MinecraftClient.getInstance();
+
+                if (!enabled) {
+                    original.render(context, tickCounter);
+                    return;
+                }
+
+                if (mc.player == null || mc.options.hudHidden) return;
+
+                TextRenderer tr = mc.textRenderer;
+                String name = mc.player.getName().getString();
+                String amount = formatCompact(balance);
+                String dollar = "$";
+                String gap = " ";
+
+                int nameW = tr.getWidth(name);
+                int numW = tr.getWidth(amount);
+                int lineW = tr.getWidth(dollar + gap) + numW;
+                int blockW = Math.max(nameW, lineW);
+
+                int sw = context.getScaledWindowWidth();
+                int sh = context.getScaledWindowHeight();
+                int left = sw - 3 - blockW;
+                int y1 = sh / 2 - 15;
+                int y2 = y1 + tr.fontHeight;
+
+                context.fill(
+                    left - 2, y1 - 1, sw,
+                    y2 + tr.fontHeight, BG
+                );
+
+                context.drawTextWithShadow(
+                    tr, name,
+                    left + (blockW - nameW) / 2,
+                    y1, WHITE
+                );
+
+                int lineX = left + (blockW - lineW) / 2;
+
+                context.drawTextWithShadow(
+                    tr, dollar, lineX, y2, GREEN
+                );
+
+                context.drawTextWithShadow(
+                    tr, amount,
+                    lineX + tr.getWidth(dollar + gap),
+                    y2, WHITE
+                );
             }
-            if (mc.player == null || mc.options.hudHidden) return;
+        );
 
-            TextRenderer tr = mc.textRenderer;
-            String name = mc.player.getName().getString();
-            String dollar = "$";
-            String gap = " ";
+        ClientCommandRegistrationCallback.EVENT.register(
+            (dispatcher, registryAccess) -> {
 
-            int nameW = tr.getWidth(name);
-            int numW = tr.getWidth(amount);
-            int lineW = tr.getWidth(dollar + gap) + numW;
-            int blockW = Math.max(nameW, lineW);
+                dispatcher.register(
+                    ClientCommandManager.literal("fakebalance")
+                        .then(ClientCommandManager.literal("off")
+                            .executes(ctx -> {
+                                enabled = false;
+                                ctx.getSource().sendFeedback(
+                                    Text.literal(
+                                        "Fake balance off (real scoreboard shown)"
+                                    )
+                                );
+                                return 1;
+                            })
+                        )
+                        .then(ClientCommandManager.literal("on")
+                            .executes(ctx -> {
+                                enabled = true;
+                                ctx.getSource().sendFeedback(
+                                    Text.literal("Fake balance on")
+                                );
+                                return 1;
+                            })
+                        )
+                        .then(ClientCommandManager.argument(
+                            "amount",
+                            StringArgumentType.greedyString()
+                        ).executes(ctx -> {
+                            Double v = parse(
+                                StringArgumentType.getString(ctx, "amount")
+                            );
 
-            int sw = context.getScaledWindowWidth();
-            int sh = context.getScaledWindowHeight();
-            int left = sw - 3 - blockW;
-            int y1 = sh / 2 - 15;
-            int y2 = y1 + tr.fontHeight;
+                            if (v == null) {
+                                ctx.getSource().sendFeedback(
+                                    Text.literal(
+                                        "Invalid amount. Try 100M or 5.5B."
+                                    )
+                                );
+                                return 0;
+                            }
 
-            // Dark box matching the real sidebar: 2px left pad, 1px above, flush to the screen's right edge
-            context.fill(left - 2, y1 - 1, sw, y2 + tr.fontHeight, BG);
+                            balance = v;
+                            enabled = true;
 
-            // Username, centered over the balance line
-            context.drawTextWithShadow(tr, name, left + (blockW - nameW) / 2, y1, WHITE);
+                            ctx.getSource().sendFeedback(
+                                Text.literal(
+                                    "Fake balance set to $ "
+                                    + formatCompact(balance)
+                                )
+                            );
 
-            // Green "$" then the amount in white, centered as one line
-            int lineX = left + (blockW - lineW) / 2;
-            context.drawTextWithShadow(tr, dollar, lineX, y2, GREEN);
-            context.drawTextWithShadow(tr, amount, lineX + tr.getWidth(dollar + gap), y2, WHITE);
-        });
+                            return 1;
+                        }))
+                );
 
-        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
-            dispatcher.register(ClientCommandManager.literal("fakebalance")
-                .then(ClientCommandManager.literal("off").executes(ctx -> {
-                    enabled = false;
-                    ctx.getSource().sendFeedback(Text.literal("Fake balance off (real scoreboard shown)"));
-                    return 1;
-                }))
-                .then(ClientCommandManager.literal("on").executes(ctx -> {
-                    enabled = true;
-                    ctx.getSource().sendFeedback(Text.literal("Fake balance on"));
-                    return 1;
-                }))
-                .then(ClientCommandManager.argument("amount", StringArgumentType.greedyString())
-                    .executes(ctx -> {
-                        amount = format(StringArgumentType.getString(ctx, "amount"));
-                        enabled = true;
-                        ctx.getSource().sendFeedback(Text.literal("Display set to: $ " + amount));
-                        return 1;
-                    }))));
+                // /fpay <name> <amount>
+                // Local-only payment simulation.
+                dispatcher.register(
+                    ClientCommandManager.literal("fpay")
+                        .then(ClientCommandManager.argument(
+                            "name",
+                            StringArgumentType.word()
+                        ).then(ClientCommandManager.argument(
+                            "amount",
+                            StringArgumentType.word()
+                        ).executes(ctx -> {
+                            String target = StringArgumentType.getString(
+                                ctx, "name"
+                            );
+
+                            Double v = parse(
+                                StringArgumentType.getString(ctx, "amount")
+                            );
+
+                            if (v == null || v <= 0) {
+                                ctx.getSource().sendFeedback(
+                                    Text.literal("Invalid amount.")
+                                        .formatted(Formatting.GRAY)
+                                );
+                                return 0;
+                            }
+
+                            if (v > balance) {
+                                ctx.getSource().sendFeedback(
+                                    Text.literal(
+                                        "Not enough fake balance."
+                                    ).formatted(Formatting.GRAY)
+                                );
+                                return 0;
+                            }
+
+                            balance -= v;
+
+                            MutableText msg = Text.literal(
+                                "You paid " + target + " "
+                            ).formatted(Formatting.WHITE)
+                                .append(
+                                    Text.literal("$")
+                                        .formatted(Formatting.GREEN)
+                                )
+                                .append(
+                                    Text.literal(
+                                        " " + formatCompact(v)
+                                    ).formatted(Formatting.WHITE)
+                                );
+
+                            MinecraftClient mc =
+                                MinecraftClient.getInstance();
+
+                            mc.inGameHud.getChatHud().addMessage(msg);
+                            mc.inGameHud.setOverlayMessage(msg, false);
+
+                            return 1;
+                        })))
+                );
+            }
+        );
     }
 
-    /** "100M", "5.5b" -> uppercase as typed. Plain numbers like 1500000000 -> "1.5B". */
-    private static String format(String input) {
-        String s = input.trim().replace("$", "").replace(",", "").replace(" ", "");
-        if (s.matches("\\d+(\\.\\d+)?")) {
-            double v = Double.parseDouble(s);
-            String[] suffix = {"", "K", "M", "B", "T"};
-            int i = 0;
-            while (v >= 1000 && i < suffix.length - 1) { v /= 1000; i++; }
-            String num = String.format("%.1f", v);
-            if (num.endsWith(".0")) num = num.substring(0, num.length() - 2);
-            return num + suffix[i];
+    /**
+     * Parses amounts such as 12, 1.5K, 250M, 2B, and $1,000.
+     */
+    private static Double parse(String input) {
+        String s = input.trim()
+            .replace("$", "")
+            .replace(",", "")
+            .replace(" ", "")
+            .toUpperCase();
+
+        if (s.isEmpty()) return null;
+
+        double mult = 1;
+        char last = s.charAt(s.length() - 1);
+
+        switch (last) {
+            case 'K' -> mult = 1e3;
+            case 'M' -> mult = 1e6;
+            case 'B' -> mult = 1e9;
+            case 'T' -> mult = 1e12;
+            default -> { }
         }
-        return s.toUpperCase();
+
+        if (mult != 1) {
+            s = s.substring(0, s.length() - 1);
+        }
+
+        try {
+            double v = Double.parseDouble(s) * mult;
+
+            if (Double.isNaN(v) || Double.isInfinite(v) || v < 0) {
+                return null;
+            }
+
+            return v;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Formats values such as 1500000000 as 1.5B.
+     */
+    private static String formatCompact(double v) {
+        String[] suffix = {"", "K", "M", "B", "T"};
+        int i = 0;
+
+        while (v >= 1000 && i < suffix.length - 1) {
+            v /= 1000;
+            i++;
+        }
+
+        String num = (i == 0 && v == Math.floor(v))
+            ? String.valueOf((long) v)
+            : String.format(java.util.Locale.US, "%.1f", v);
+
+        if (num.endsWith(".0")) {
+            num = num.substring(0, num.length() - 2);
+        }
+
+        return num + suffix[i];
     }
 }
