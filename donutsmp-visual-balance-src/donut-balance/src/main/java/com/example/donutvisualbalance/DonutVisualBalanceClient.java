@@ -16,6 +16,8 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
 
     private static final int GREEN = 0xFF55FF55;
     private static final int WHITE = 0xFFFFFFFF;
+    // Box behind the text: measured ~40% black from the real sidebar (0x66 = 102/255).
+    private static final int BG = 0x66000000;
 
     @Override
     public void onInitializeClient() {
@@ -43,6 +45,9 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
             int left = sw - 3 - blockW;
             int y1 = sh / 2 - 15;
             int y2 = y1 + tr.fontHeight;
+
+            // Dark box matching the real sidebar: 2px left pad, 1px above, flush to the screen's right edge
+            context.fill(left - 2, y1 - 1, sw, y2 + tr.fontHeight, BG);
 
             // Username, centered over the balance line
             context.drawTextWithShadow(tr, name, left + (blockW - nameW) / 2, y1, WHITE);
