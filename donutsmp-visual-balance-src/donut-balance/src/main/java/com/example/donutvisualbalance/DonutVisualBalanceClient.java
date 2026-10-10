@@ -41,8 +41,8 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
             int sw = context.getScaledWindowWidth();
             int sh = context.getScaledWindowHeight();
             int left = sw - 3 - blockW;
-            int y1 = sh / 2 - tr.fontHeight;
-            int y2 = y1 + tr.fontHeight + 2;
+            int y1 = sh / 2 - 15;
+            int y2 = y1 + tr.fontHeight;
 
             // Username, centered over the balance line
             context.drawTextWithShadow(tr, name, left + (blockW - nameW) / 2, y1, WHITE);
