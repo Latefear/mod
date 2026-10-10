@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "donutsmp_visual_balance",
+  "version": "1.0.0",
+  "name": "DonutSMP Visual Balance",
+  "description": "Client-side custom balance HUD. Visual only; does not alter server data.",
+  "environment": "client",
+  "entrypoints": { "client": ["com.example.donutvisualbalance.DonutVisualBalanceClient"] },
+  "depends": { "fabricloader": ">=0.16.5", "minecraft": "~1.21.1", "java": ">=21", "fabric-api": "*" }
+}
