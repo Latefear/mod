@@ -8,10 +8,13 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallba
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.item.v1.ItemTooltipCallback;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
+import net.minecraft.client.option.KeyBinding;
 import net.minecraft.command.CommandSource;
 import net.minecraft.item.Items;
 import net.minecraft.text.MutableText;
@@ -36,16 +39,10 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
     private static String echoName = null;
     private static final boolean[] wasDown = new boolean[10];
 
-    // /fpay tab-completion: online players for <name>, shorthand amounts
-    // for <amount> (which also replaces the "<name> <amount>" usage hint)
+    // /fpay tab-completion: online players for <name>
     private static final SuggestionProvider<FabricClientCommandSource>
         PLAYER_SUGGESTIONS = (ctx, builder) -> CommandSource.suggestMatching(
             ctx.getSource().getPlayerNames(), builder
-        );
-
-    private static final SuggestionProvider<FabricClientCommandSource>
-        AMOUNT_SUGGESTIONS = (ctx, builder) -> CommandSource.suggestMatching(
-            List.of("1K", "10K", "100K", "1M", "10M", "100M", "1B"), builder
         );
 
     @Override
@@ -111,11 +108,40 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
 
         ItemTooltipCallback.EVENT.register((stack, context, type, lines) -> {
             if (stack.isOf(Items.AMETHYST_SHARD) && amethystName != null) {
-                setTooltipName(lines, amethystName);
+                setTooltipName(lines, amethystName, Formatting.WHITE);
             } else if (stack.isOf(Items.ECHO_SHARD) && echoName != null) {
-                setTooltipName(lines, echoName);
+                setTooltipName(lines, echoName, Formatting.YELLOW);
             }
         });
+
+        // Stop Ctrl/Alt + 1-9 from switching the hotbar slot in the world
+        // (runs before the game handles input for the tick)
+        ClientTickEvents.START_CLIENT_TICK.register(mc -> {
+            if (mc.getWindow() == null) return;
+            long handle = mc.getWindow().getHandle();
+            if (modifierHeld(handle)) {
+                for (KeyBinding kb : mc.options.hotbarKeys) {
+                    while (kb.wasPressed()) {
+                        // swallow the press
+                    }
+                }
+            }
+        });
+
+        // Stop Ctrl/Alt + 1-9 from swapping the hovered item into the hotbar
+        // while a container (like the dispenser) is open
+        ScreenEvents.AFTER_INIT.register((client, screen, w, h) ->
+            ScreenKeyboardEvents.allowKeyPress(screen).register(
+                (s, input) -> {
+                    if (client.getWindow() == null) return true;
+                    long handle = client.getWindow().getHandle();
+                    int key = input.key();
+                    boolean number = key >= GLFW.GLFW_KEY_1
+                        && key <= GLFW.GLFW_KEY_9;
+                    return !(number && modifierHeld(handle));
+                }
+            )
+        );
 
         ClientCommandRegistrationCallback.EVENT.register(
             (dispatcher, registryAccess) -> {
@@ -184,8 +210,7 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
                         .then(ClientCommandManager.argument(
                             "amount",
                             StringArgumentType.word()
-                        ).suggests(AMOUNT_SUGGESTIONS)
-                        .executes(ctx -> {
+                        ).executes(ctx -> {
                             String target = StringArgumentType.getString(
                                 ctx, "name"
                             );
@@ -271,10 +296,19 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
         return GLFW.glfwGetKey(handle, key) == GLFW.GLFW_PRESS;
     }
 
+    private static boolean modifierHeld(long handle) {
+        return isKeyDown(handle, GLFW.GLFW_KEY_LEFT_CONTROL)
+            || isKeyDown(handle, GLFW.GLFW_KEY_RIGHT_CONTROL)
+            || isKeyDown(handle, GLFW.GLFW_KEY_LEFT_ALT)
+            || isKeyDown(handle, GLFW.GLFW_KEY_RIGHT_ALT);
+    }
+
     /** The first tooltip line is the item name, so swap just that line. */
-    private static void setTooltipName(List<Text> lines, String nameValue) {
+    private static void setTooltipName(
+        List<Text> lines, String nameValue, Formatting color
+    ) {
         if (lines.isEmpty()) return;
-        lines.set(0, Text.literal(nameValue).formatted(Formatting.WHITE));
+        lines.set(0, Text.literal(nameValue).formatted(color));
     }
 
     // ---------------------------------------------------------------
