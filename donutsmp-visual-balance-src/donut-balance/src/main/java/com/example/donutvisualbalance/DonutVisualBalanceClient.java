@@ -1,16 +1,18 @@
-
 package com.example.donutvisualbalance;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.suggestion.SuggestionProvider;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.item.v1.ItemTooltipCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
+import net.minecraft.command.CommandSource;
 import net.minecraft.item.Items;
 import net.minecraft.text.MutableText;
 import net.minecraft.text.Text;
@@ -18,7 +20,6 @@ import net.minecraft.util.Formatting;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.List;
-import java.util.Locale;
 
 public class DonutVisualBalanceClient implements ClientModInitializer {
     private static double balance = 1_000_000_000d;
@@ -28,9 +29,24 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
     private static final int WHITE = 0xFFFFFFFF;
     private static final int BG = 0x66000000;
 
+    // Item name overrides (client-side display only)
+    // Ctrl + 1-9 -> amethyst shard name, Alt + 1-9 -> echo shard name,
+    // Ctrl/Alt + 0 -> reset that item to its real name.
     private static String amethystName = null;
     private static String echoName = null;
     private static final boolean[] wasDown = new boolean[10];
+
+    // /fpay tab-completion: online players for <name>, shorthand amounts
+    // for <amount> (which also replaces the "<name> <amount>" usage hint)
+    private static final SuggestionProvider<FabricClientCommandSource>
+        PLAYER_SUGGESTIONS = (ctx, builder) -> CommandSource.suggestMatching(
+            ctx.getSource().getPlayerNames(), builder
+        );
+
+    private static final SuggestionProvider<FabricClientCommandSource>
+        AMOUNT_SUGGESTIONS = (ctx, builder) -> CommandSource.suggestMatching(
+            List.of("1K", "10K", "100K", "1M", "10M", "100M", "1B"), builder
+        );
 
     @Override
     public void onInitializeClient() {
@@ -53,7 +69,8 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
                 String gap = " ";
 
                 int nameW = tr.getWidth(name);
-                int lineW = tr.getWidth(dollar + gap) + tr.getWidth(amount);
+                int numW = tr.getWidth(amount);
+                int lineW = tr.getWidth(dollar + gap) + numW;
                 int blockW = Math.max(nameW, lineW);
 
                 int sw = context.getScaledWindowWidth();
@@ -87,6 +104,7 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
             }
         );
 
+        // Item name override: key polling + tooltip rewrite
         ClientTickEvents.END_CLIENT_TICK.register(
             DonutVisualBalanceClient::nameKeyTick
         );
@@ -108,7 +126,9 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
                             .executes(ctx -> {
                                 enabled = false;
                                 ctx.getSource().sendFeedback(
-                                    Text.literal("Fake balance off")
+                                    Text.literal(
+                                        "Fake balance off (real scoreboard shown)"
+                                    )
                                 );
                                 return 1;
                             })
@@ -123,7 +143,8 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
                             })
                         )
                         .then(ClientCommandManager.argument(
-                            "amount", StringArgumentType.greedyString()
+                            "amount",
+                            StringArgumentType.greedyString()
                         ).executes(ctx -> {
                             Double v = parse(
                                 StringArgumentType.getString(ctx, "amount")
@@ -152,14 +173,19 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
                         }))
                 );
 
-                // /fpay <name> <amount>, local simulation only.
+                // /fpay <name> <amount>
+                // Local-only payment simulation.
                 dispatcher.register(
                     ClientCommandManager.literal("fpay")
                         .then(ClientCommandManager.argument(
-                            "name", StringArgumentType.word()
-                        ).then(ClientCommandManager.argument(
-                            "amount", StringArgumentType.word()
-                        ).executes(ctx -> {
+                            "name",
+                            StringArgumentType.word()
+                        ).suggests(PLAYER_SUGGESTIONS)
+                        .then(ClientCommandManager.argument(
+                            "amount",
+                            StringArgumentType.word()
+                        ).suggests(AMOUNT_SUGGESTIONS)
+                        .executes(ctx -> {
                             String target = StringArgumentType.getString(
                                 ctx, "name"
                             );
@@ -178,36 +204,33 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
 
                             if (v > balance) {
                                 ctx.getSource().sendFeedback(
-                                    Text.literal("Not enough fake balance.")
-                                        .formatted(Formatting.GRAY)
+                                    Text.literal(
+                                        "Not enough fake balance."
+                                    ).formatted(Formatting.GRAY)
                                 );
                                 return 0;
                             }
 
                             balance -= v;
 
-                            MutableText msg = Text.literal("[SIM] ")
-                                .formatted(Formatting.RED, Formatting.BOLD)
-                                .append(
-                                    Text.literal("You paid " + target + " ")
-                                        .formatted(Formatting.WHITE)
-                                )
+                            MutableText msg = Text.literal(
+                                "You paid " + target + " "
+                            ).formatted(Formatting.WHITE)
                                 .append(
                                     Text.literal("$")
                                         .formatted(Formatting.GREEN)
                                 )
                                 .append(
-                                    Text.literal(" " + formatCompact(v))
-                                        .formatted(Formatting.WHITE)
+                                    Text.literal(
+                                        " " + formatCompact(v)
+                                    ).formatted(Formatting.WHITE)
                                 );
 
                             MinecraftClient mc =
                                 MinecraftClient.getInstance();
 
-                            if (mc.inGameHud != null) {
-                                mc.inGameHud.getChatHud().addMessage(msg);
-                                mc.inGameHud.setOverlayMessage(msg, false);
-                            }
+                            mc.inGameHud.getChatHud().addMessage(msg);
+                            mc.inGameHud.setOverlayMessage(msg, false);
 
                             return 1;
                         })))
@@ -216,33 +239,30 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
         );
     }
 
-    // Item name shortcuts. Ignore key presses while a screen is open.
+    // ---------------------------------------------------------------
+    // Item name override helpers
+    // ---------------------------------------------------------------
+
     private static void nameKeyTick(MinecraftClient mc) {
         if (mc.getWindow() == null) return;
-
         long handle = mc.getWindow().getHandle();
 
         boolean ctrl = isKeyDown(handle, GLFW.GLFW_KEY_LEFT_CONTROL)
             || isKeyDown(handle, GLFW.GLFW_KEY_RIGHT_CONTROL);
-
         boolean alt = isKeyDown(handle, GLFW.GLFW_KEY_LEFT_ALT)
             || isKeyDown(handle, GLFW.GLFW_KEY_RIGHT_ALT);
-
-        boolean screenOpen = mc.currentScreen != null;
 
         for (int n = 0; n <= 9; n++) {
             boolean down = isKeyDown(handle, GLFW.GLFW_KEY_0 + n);
             boolean pressedNow = down && !wasDown[n];
             wasDown[n] = down;
 
-            if (!pressedNow || screenOpen || mc.player == null) continue;
+            if (!pressedNow) continue;
 
             if (ctrl && !alt) {
-                amethystName = n == 0 ? null : String.valueOf(n);
-                showNameNotice(mc, "Amethyst shard", amethystName);
+                amethystName = (n == 0) ? null : String.valueOf(n);
             } else if (alt && !ctrl) {
-                echoName = n == 0 ? null : String.valueOf(n);
-                showNameNotice(mc, "Echo shard", echoName);
+                echoName = (n == 0) ? null : String.valueOf(n);
             }
         }
     }
@@ -251,32 +271,25 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
         return GLFW.glfwGetKey(handle, key) == GLFW.GLFW_PRESS;
     }
 
-    private static void showNameNotice(
-        MinecraftClient mc, String item, String nameValue
-    ) {
-        if (mc.player == null) return;
-
-        String msg = nameValue == null
-            ? item + " name reset"
-            : item + " display name: " + nameValue;
-
-        mc.player.sendMessage(
-            Text.literal(msg).formatted(Formatting.GRAY), true
-        );
-    }
-
+    /** The first tooltip line is the item name, so swap just that line. */
     private static void setTooltipName(List<Text> lines, String nameValue) {
         if (lines.isEmpty()) return;
         lines.set(0, Text.literal(nameValue).formatted(Formatting.WHITE));
     }
 
-    // Balance parsing.
+    // ---------------------------------------------------------------
+    // Balance parsing / formatting
+    // ---------------------------------------------------------------
+
+    /**
+     * Parses amounts such as 12, 1.5K, 250M, 2B, and $1,000.
+     */
     private static Double parse(String input) {
         String s = input.trim()
             .replace("$", "")
             .replace(",", "")
             .replace(" ", "")
-            .toUpperCase(Locale.ROOT);
+            .toUpperCase();
 
         if (s.isEmpty()) return null;
 
@@ -295,19 +308,23 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
             s = s.substring(0, s.length() - 1);
         }
 
-        if (s.isEmpty()) return null;
-
         try {
             double v = Double.parseDouble(s) * mult;
 
-            if (!Double.isFinite(v) || v < 0) return null;
+            if (Double.isNaN(v) || Double.isInfinite(v) || v < 0) {
+                return null;
+            }
+
             return v;
         } catch (NumberFormatException e) {
             return null;
         }
     }
 
-    // Millions and above round to whole numbers.
+    /**
+     * Formats values compactly. Millions and above are rounded to whole
+     * numbers (30.9B becomes 31B); below that, one decimal is kept (1.5K).
+     */
     private static String formatCompact(double v) {
         String[] suffix = {"", "K", "M", "B", "T"};
         int i = 0;
@@ -317,9 +334,11 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
             i++;
         }
 
+        // Millions and up: whole numbers only
         if (i >= 2) {
             long rounded = Math.round(v);
 
+            // 999.6M rounds to 1000M, so roll over to 1B
             if (rounded >= 1000 && i < suffix.length - 1) {
                 rounded = 1;
                 i++;
@@ -330,7 +349,7 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
 
         String num = (i == 0 && v == Math.floor(v))
             ? String.valueOf((long) v)
-            : String.format(Locale.US, "%.1f", v);
+            : String.format(java.util.Locale.US, "%.1f", v);
 
         if (num.endsWith(".0")) {
             num = num.substring(0, num.length() - 2);
