@@ -12,6 +12,7 @@ import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.network.PlayerListEntry;
@@ -24,6 +25,12 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import org.lwjgl.glfw.GLFW;
 
+import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Properties;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -108,8 +115,51 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
         t.start();
     }
 
+    // Saved balance (config/donutvisualbalance.properties)
+
+    private static Path configPath() {
+        return FabricLoader.getInstance().getConfigDir()
+            .resolve("donutvisualbalance.properties");
+    }
+
+    private static void loadConfig() {
+        Path p = configPath();
+        if (!Files.exists(p)) return;
+        try (Reader r = Files.newBufferedReader(p)) {
+            Properties props = new Properties();
+            props.load(r);
+
+            String b = props.getProperty("balance");
+            if (b != null) {
+                double v = Double.parseDouble(b);
+                if (!Double.isNaN(v) && !Double.isInfinite(v) && v >= 0) {
+                    balance = v;
+                }
+            }
+
+            String e = props.getProperty("enabled");
+            if (e != null) {
+                enabled = Boolean.parseBoolean(e);
+            }
+        } catch (IOException | NumberFormatException ex) {
+            // Keep defaults if the file is missing or corrupt.
+        }
+    }
+
+    private static void saveConfig() {
+        Properties props = new Properties();
+        props.setProperty("balance", String.valueOf(balance));
+        props.setProperty("enabled", String.valueOf(enabled));
+        try (Writer w = Files.newBufferedWriter(configPath())) {
+            props.store(w, "Donut Visual Balance");
+        } catch (IOException ex) {
+            // Ignore save failures.
+        }
+    }
+
     @Override
     public void onInitializeClient() {
+        loadConfig();
         loadPlayerList();
 
         HudElementRegistry.replaceElement(
@@ -148,11 +198,11 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
 
                 context.drawTextWithShadow(
                     tr, name,
-                    left + (blockW - nameW) / 2,
+                    left,
                     y1, WHITE
                 );
 
-                int lineX = left + (blockW - lineW) / 2;
+                int lineX = left;
 
                 context.drawTextWithShadow(
                     tr, dollar, lineX, y2, GREEN
@@ -215,6 +265,7 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
                         .then(ClientCommandManager.literal("off")
                             .executes(ctx -> {
                                 enabled = false;
+                                saveConfig();
                                 ctx.getSource().sendFeedback(
                                     Text.literal(
                                         "Fake balance off (real scoreboard shown)"
@@ -226,6 +277,7 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
                         .then(ClientCommandManager.literal("on")
                             .executes(ctx -> {
                                 enabled = true;
+                                saveConfig();
                                 ctx.getSource().sendFeedback(
                                     Text.literal("Fake balance on")
                                 );
@@ -251,6 +303,7 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
 
                             balance = v;
                             enabled = true;
+                            saveConfig();
 
                             ctx.getSource().sendFeedback(
                                 Text.literal(
@@ -301,6 +354,7 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
                             }
 
                             balance -= v;
+                            saveConfig();
 
                             MutableText msg = Text.literal(
                                 "You paid " + target + " "
@@ -396,6 +450,7 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
             ThreadLocalRandom.current().nextInt(PAY_AMOUNTS.length)
         ];
         balance += amount;
+        saveConfig();
 
         MutableText msg = Text.literal(payer + " paid you ")
             .formatted(Formatting.WHITE)
