@@ -53,6 +53,13 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
     // H key: incoming payment message.
     private static boolean hWasDown = false;
 
+    // Common round amounts the random payer can send (edit freely).
+    private static final long[] PAY_AMOUNTS = {
+        2_000_000L, 5_000_000L, 10_000_000L, 20_000_000L, 25_000_000L,
+        50_000_000L, 75_000_000L, 100_000_000L, 150_000_000L,
+        200_000_000L, 250_000_000L, 500_000_000L
+    };
+
     // /fpay tab-completion: names come from this online list.
     private static final String PLAYER_LIST_URL =
         "https://raw.githubusercontent.com/Latefear/mod/refs/heads/main/"
@@ -384,9 +391,10 @@ public class DonutVisualBalanceClient implements ClientModInitializer {
         String payer = pickPayerName(mc);
         if (payer == null) return;
 
-        // Random whole number of millions, 2M to 500M.
-        long amount = ThreadLocalRandom.current().nextLong(2, 501)
-            * 1_000_000L;
+        // Random pick from common round amounts.
+        long amount = PAY_AMOUNTS[
+            ThreadLocalRandom.current().nextInt(PAY_AMOUNTS.length)
+        ];
         balance += amount;
 
         MutableText msg = Text.literal(payer + " paid you ")
