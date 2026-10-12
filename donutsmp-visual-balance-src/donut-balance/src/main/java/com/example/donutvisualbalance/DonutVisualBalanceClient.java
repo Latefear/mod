@@ -495,5 +495,6 @@ private static String formatCompact(double v) {
         num = num.substring(0, num.length() - 2);
     }
 
-    return num + suffix[i];
+     return num + suffix[i];
+    }
 }
